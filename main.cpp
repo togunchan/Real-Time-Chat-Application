@@ -5,15 +5,26 @@
 #include <unistd.h>
 #include <vector>
 #include <thread>
+#include <mutex>
+#include <fstream>
 
 #define PORT 8080
 
 std::mutex log_mutex;
+std::ofstream log_file;
 
 void log_message(const std::string &message)
 {
     std::lock_guard<std::mutex> lock(log_mutex);
-    std::cout << message << std::endl;
+    if (log_file.is_open())
+    {
+        log_file << message << std::endl;
+        std::cout << message << std::endl;
+    }
+    else
+    {
+        std::cerr << "Log file could not be opened!" << std::endl;
+    }
 }
 
 void handle_client(int client_socket)
@@ -27,9 +38,11 @@ void handle_client(int client_socket)
         if (bytes_read > 0)
         {
             buffer[bytes_read] = '\0';
-            log_message("Message received: " + std::string(buffer));
+            std::cout << "Message from client: " << std::string(buffer) << std::endl;
+            log_message("Message received from client: " + std::string(buffer));
 
             send(client_socket, response, strlen(response), 0);
+            std::cout << "Message sent to client: " << std::string(response) << std::endl;
             log_message("Message sent to client: " + std::string(response));
         }
         else if (bytes_read == 0)
@@ -40,7 +53,7 @@ void handle_client(int client_socket)
         }
         else
         {
-            perror("Read error");
+            log_message("Read error");
             close(client_socket);
             break;
         }
@@ -49,6 +62,14 @@ void handle_client(int client_socket)
 
 int main()
 {
+
+    log_file.open("server_logs.txt", std::ios::app);
+    if (!log_file.is_open())
+    {
+        std::cerr << "Failed to open log file!" << std::endl;
+        return -1;
+    }
+
     int server_fd;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
@@ -96,7 +117,10 @@ int main()
 
     for (auto &thread : client_threads)
     {
-        thread.join();
+        if (thread.joinable())
+        {
+            thread.join();
+        }
     }
 
     close(server_fd);
