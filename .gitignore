@@ -1,1 +1,4 @@
-/output
+/server
+/client
+.vscode/
+/server_logs.txt

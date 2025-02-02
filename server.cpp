@@ -30,7 +30,7 @@ void log_message(const std::string &message)
 void handle_client(int client_socket)
 {
     char buffer[1024] = {0};
-    const char *response = "Server: Message received!";
+    const char *response = "Message received!";
     while (true)
     {
         memset(buffer, 0, sizeof(buffer));
@@ -38,11 +38,9 @@ void handle_client(int client_socket)
         if (bytes_read > 0)
         {
             buffer[bytes_read] = '\0';
-            std::cout << "Message from client: " << std::string(buffer) << std::endl;
             log_message("Message received from client: " + std::string(buffer));
 
             send(client_socket, response, strlen(response), 0);
-            std::cout << "Message sent to client: " << std::string(response) << std::endl;
             log_message("Message sent to client: " + std::string(response));
         }
         else if (bytes_read == 0)
@@ -62,7 +60,6 @@ void handle_client(int client_socket)
 
 int main()
 {
-
     log_file.open("server_logs.txt", std::ios::app);
     if (!log_file.is_open())
     {
@@ -85,6 +82,13 @@ int main()
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
+
+    int opt = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    {
+        perror("setsockopt failed");
+        exit(EXIT_FAILURE);
+    }
 
     if (bind(server_fd, (const sockaddr *)&address, sizeof(address)) < 0)
     {
