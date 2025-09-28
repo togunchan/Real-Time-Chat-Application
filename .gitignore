@@ -1,4 +1,20 @@
+# Build outputs
 /server
 /client
+/server_test
+*.o
+*.obj
+*.out
+*.exe
+*.log
+
+# IDE and editor config
 .vscode/
+*.swp
+*.swo
+
+# OS cruft
+.DS_Store
+
+# Runtime artifacts
 /server_logs.txt

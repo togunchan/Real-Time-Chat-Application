@@ -1,12 +1,16 @@
-#include <iostream>
+#include <algorithm>
+#include <cerrno>
+#include <chrono>
 #include <cstring>
-#include <sys/socket.h>
+#include <fstream>
+#include <iostream>
+#include <mutex>
 #include <netinet/in.h>
+#include <string>
+#include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
-#include <thread>
-#include <mutex>
-#include <fstream>
 #include <fcntl.h>
 
 #define PORT 8080
@@ -48,19 +52,24 @@ void broadcast_message(const std::string &message, int sender_socket)
             {
                 log_message("Client " + std::to_string(client_socket) + " disconnected (send error).");
                 disconnected_clients.push_back(client_socket);
-
-                // in case of error, remove the client from the list
-                std::lock_guard<std::mutex> lock(client_mutex);
-                clients.erase(std::remove(clients.begin(), clients.end(), client_socket), clients.end());
-                close(client_socket);
             }
         }
     }
 
-    for (int client_socket : disconnected_clients)
+    if (!disconnected_clients.empty())
     {
-        clients.erase(std::remove(clients.begin(), clients.end(), client_socket), clients.end());
-        close(client_socket);
+        {
+            std::lock_guard<std::mutex> lock(client_mutex);
+            for (int client_socket : disconnected_clients)
+            {
+                clients.erase(std::remove(clients.begin(), clients.end(), client_socket), clients.end());
+            }
+        }
+
+        for (int client_socket : disconnected_clients)
+        {
+            close(client_socket);
+        }
     }
 }
 
@@ -124,60 +133,79 @@ void handle_client(int client_socket)
     close(client_socket);
 }
 
-int main()
+bool initialize_log(const std::string &path)
 {
-    log_file.open("server_logs.txt", std::ios::app);
+    log_file.open(path, std::ios::app);
     if (!log_file.is_open())
     {
         std::cerr << "Failed to open log file!" << std::endl;
-        return -1;
+        return false;
     }
+    return true;
+}
 
-    int server_fd;
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
-
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+int create_server_socket()
+{
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1)
     {
         perror("Socket failed");
-        return -1;
     }
+    return server_fd;
+}
 
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
-
+bool configure_socket_options(int server_fd)
+{
     int opt = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     {
         perror("setsockopt failed");
-        exit(EXIT_FAILURE);
+        return false;
     }
+    return true;
+}
 
-    if (bind(server_fd, (const sockaddr *)&address, sizeof(address)) < 0)
+sockaddr_in create_server_address()
+{
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+    return address;
+}
+
+bool bind_server_address(int server_fd, const sockaddr_in &address)
+{
+    if (bind(server_fd, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) < 0)
     {
         perror("Bind failed");
-        return -1;
+        return false;
     }
+    return true;
+}
 
+bool start_listening(int server_fd)
+{
     if (listen(server_fd, 5) < 0)
     {
         perror("Listen failed");
-        return -1;
+        return false;
     }
+    return true;
+}
 
-    log_message("Server is listening on port " + std::to_string(PORT));
-
+bool accept_clients(int server_fd, sockaddr_in &address, socklen_t addrlen)
+{
     std::vector<std::thread> client_threads;
-
     while (true)
     {
-        int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+        socklen_t client_len = addrlen;
+        int new_socket = accept(server_fd, reinterpret_cast<sockaddr *>(&address), &client_len);
 
         if (new_socket < 0)
         {
             perror("Accept failed");
-            return -1;
+            break;
         }
         log_message("New client connected.");
         client_threads.emplace_back(handle_client, new_socket);
@@ -191,7 +219,47 @@ int main()
         }
     }
 
+    return false;
+}
+
+int main()
+{
+    if (!initialize_log("server_logs.txt"))
+    {
+        return -1;
+    }
+
+    int server_fd = create_server_socket();
+    if (server_fd == -1)
+    {
+        return -1;
+    }
+
+    if (!configure_socket_options(server_fd))
+    {
+        close(server_fd);
+        return -1;
+    }
+
+    sockaddr_in address = create_server_address();
+    socklen_t addrlen = sizeof(address);
+
+    if (!bind_server_address(server_fd, address))
+    {
+        close(server_fd);
+        return -1;
+    }
+
+    if (!start_listening(server_fd))
+    {
+        close(server_fd);
+        return -1;
+    }
+
+    log_message("Server is listening on port " + std::to_string(PORT));
+
+    bool accept_success = accept_clients(server_fd, address, addrlen);
     close(server_fd);
 
-    return 0;
+    return accept_success ? 0 : -1;
 }

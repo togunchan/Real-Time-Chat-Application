@@ -1,9 +1,10 @@
+#include <arpa/inet.h>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <sys/socket.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 #include <thread>
+#include <unistd.h>
 
 #define SERVER_ADDRESS "127.0.0.1"
 #define SERVER_PORT 8080
@@ -35,40 +36,8 @@ void receive_message(int sock)
     }
 }
 
-int main()
+void handle_user_input(int sock)
 {
-    int sock = 0;
-    struct sockaddr_in server_address;
-
-    // create a socket
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        std::cerr << "Socket creation error" << std::endl;
-        return -1;
-    }
-
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(SERVER_PORT);
-
-    // Convert SERVER_ADDRESS to binary format and store it in server_address.sin_addr, checking its validity
-    if (inet_pton(AF_INET, SERVER_ADDRESS, &server_address.sin_addr) <= 0)
-    {
-        std::cerr << "Invalid address/ Address not supported" << std::endl;
-        return -1;
-    }
-
-    // Connect to server
-    if (connect(sock, (struct sockaddr *)&server_address, sizeof(server_address)) < 0)
-    {
-        std::cerr << "Connection failed" << std::endl;
-        return -1;
-    }
-
-    std::cout << "Connected to server. Type messages and press Enter to send." << std::endl;
-
-    // start the thread that will receive messages from the server
-    std::thread receive_thread(receive_message, sock);
-
     std::string message;
     while (true)
     {
@@ -83,6 +52,71 @@ int main()
         send(sock, message.c_str(), message.length(), 0);
         std::cout << "Message sent" << std::endl;
     }
+}
+
+int create_client_socket()
+{
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0)
+    {
+        std::cerr << "Socket creation error" << std::endl;
+    }
+    return sock;
+}
+
+bool connect_to_server(int sock, const sockaddr_in &server_address)
+{
+    if (connect(sock, (const sockaddr *)&server_address, sizeof(server_address)) < 0)
+    {
+        std::cerr << "Connection failed" << std::endl;
+        return false;
+    }
+    return true;
+}
+
+sockaddr_in create_server_address()
+{
+    sockaddr_in server_address{};
+    server_address.sin_family = AF_INET;
+    server_address.sin_port = htons(SERVER_PORT);
+
+    // Convert SERVER_ADDRESS to binary format and store it in server_address.sin_addr, checking its validity
+    if (inet_pton(AF_INET, SERVER_ADDRESS, &server_address.sin_addr) <= 0)
+    {
+        std::cerr << "Invalid address/ Address not supported" << std::endl;
+        return {};
+    }
+
+    return server_address;
+}
+
+int main()
+{
+    int sock = create_client_socket();
+    if (sock < 0)
+    {
+        return -1;
+    }
+
+    sockaddr_in server_address = create_server_address();
+    if (server_address.sin_family == 0)
+    {
+        close(sock);
+        return -1;
+    }
+
+    if (!connect_to_server(sock, server_address))
+    {
+        close(sock);
+        return -1;
+    }
+
+    std::cout << "Connected to server. Type messages and press Enter to send." << std::endl;
+
+    // start the thread that will receive messages from the server
+    std::thread receive_thread(receive_message, sock);
+
+    handle_user_input(sock);
 
     close(sock);
     receive_thread.join();
